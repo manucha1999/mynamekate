@@ -504,12 +504,17 @@ function startQuiz(bid, qid, fresh){
   if (!q.questions && q.file){
     if (loading) return; loading = true;
     var closeL = modal('<h3>กำลังโหลดข้อสอบ…</h3><p>'+esc(q.name || q.title)+'</p>');
-    fetch(q.file).then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); }).then(function(data){
-      loading = false; closeL(); q.questions = data.questions; startQuiz(bid, qid, fresh);
-    }).catch(function(){
-      loading = false; closeL();
-      modal('<h3>โหลดข้อสอบไม่ได้</h3><p>ตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่อีกครั้ง</p><button class="btn block" data-m="x">ตกลง</button>', function(m, close){ m.querySelector('[data-m="x"]').onclick = close; });
-    });
+    var sc = document.createElement("script"); sc.src = q.file;
+    sc.onload = function(){
+      var data = window.QUIZ_DATA && window.QUIZ_DATA[q.id];
+      loading = false; closeL(); sc.remove();
+      if (data){ q.questions = data.questions; startQuiz(bid, qid, fresh); } else sc.onerror(true);
+    };
+    sc.onerror = function(already){
+      if (already !== true){ loading = false; closeL(); sc.remove(); }
+      modal('<h3>โหลดข้อสอบไม่ได้</h3><p>ไม่พบไฟล์ '+esc(q.file)+' ตรวจสอบว่าอัปโฟลเดอร์ data ขึ้นไปครบ หรือเชื่อมต่ออินเทอร์เน็ตอยู่</p><button class="btn block" data-m="x">ตกลง</button>', function(m, close){ m.querySelector('[data-m="x"]').onclick = close; });
+    };
+    document.head.appendChild(sc);
     return;
   }
   var ip = S.inprog && S.inprog[q.id];
