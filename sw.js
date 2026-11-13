@@ -1,7 +1,7 @@
 // ทำให้แอปเปิดได้แม้ไม่มีอินเทอร์เน็ต
 // เมื่อออนไลน์จะโหลดเวอร์ชันล่าสุดเสมอ (เนื้อหาใหม่จึงขึ้นทันที) และเก็บสำเนาไว้ใช้ตอนออฟไลน์
-const CACHE = "bookapp-v7";
-const CORE = ["./", "./index.html", "./content.js", "./sassadee-quiz.js", "./english-quiz.js", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
+const CACHE = "bookapp-v8";
+const CORE = ["./", "./index.html", "./content.js", "./sassadee-quiz.js", "./english-quiz.js", "./thai-quiz.js", "./THSarabun.ttf", "./THSarabun-Bold.ttf", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting()));
