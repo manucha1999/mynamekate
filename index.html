@@ -14,7 +14,7 @@
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Sarabun:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Sarabun:ital,wght@0,400;0,500;0,600;0,700;1,500&display=swap" rel="stylesheet">
 <style>
 :root{
   --paper:#f6f1e7; --card:#fffdf8; --ink:#2a2420; --muted:#7a6f66; --line:#e6ddcf;
@@ -231,6 +231,25 @@ h2.sec{font-size:16px}
 .subj{box-shadow:0 8px 20px rgba(0,50,120,.25);border:3px solid rgba(255,255,255,.55)}
 .subj-hero{box-shadow:0 8px 20px rgba(0,50,120,.2);border:3px solid rgba(255,255,255,.55)}
 .opt .bar{background:var(--line)}
+.qimg{display:block;width:100%;height:auto;border-radius:14px;margin:0 0 16px;background:#fff;box-shadow:var(--shadow)}
+.passage{background:var(--card);color:var(--ink);border-radius:14px;padding:16px 18px;margin:0 0 16px;max-height:46vh;overflow:auto;-webkit-overflow-scrolling:touch;font-size:17px;line-height:1.75;white-space:pre-line;box-shadow:var(--shadow)}
+.feedback .ex{white-space:pre-line;font-size:15.5px;line-height:1.65;margin-top:6px}
+.reader{font-weight:500;color:var(--ink);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.reader strong{font-weight:700;color:var(--ink)}
+.reader mark{background:#fff1a8;color:#1d2b3a;padding:0 .2em;border-radius:4px;font-weight:700}
+[data-theme="dark"] .reader mark{background:#6b5a12;color:#fff}
+.reader h3{font-size:1.18em;color:var(--accent);margin:1.5em 0 .5em;padding-bottom:.25em;border-bottom:2px solid color-mix(in srgb,var(--accent) 25%,transparent)}
+.reader h4{font-family:var(--ui);font-size:1.02em;margin:1.2em 0 .4em}
+.reader ol{margin:0 0 1em;padding-left:1.5em}
+.reader ol li,.reader ul li{margin:.3em 0}
+.reader .key{position:relative;background:#fff4e5;border:2px solid #ffb347;color:#3d2a12;border-radius:14px;padding:30px 18px 14px;margin:1.2em 0}
+[data-theme="dark"] .reader .key{background:#3a2a12;color:#ffe7c2;border-color:#a8742a}
+.reader .key-tag{position:absolute;top:-1px;left:-1px;background:#ff9f1c;color:#fff;font-family:var(--ui);font-size:13px;font-weight:700;padding:3px 12px;border-radius:12px 0 12px 0}
+.reader .tbl{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 1.2em;border-radius:12px;border:1px solid var(--line)}
+.reader table{border-collapse:collapse;width:100%;font-size:.88em;line-height:1.55}
+.reader th{background:color-mix(in srgb,var(--accent) 12%,var(--card));text-align:left;font-family:var(--ui);font-weight:700;padding:10px 12px;white-space:nowrap}
+.reader td{padding:9px 12px;border-top:1px solid var(--line);vertical-align:top}
+.reader tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--line) 35%,transparent)}
 </style>
 </head>
 <body>
@@ -253,7 +272,7 @@ var cleanup = null;   // per-view teardown
 
 /* ---------- helpers ---------- */
 function esc(s){ return String(s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
-function inline(s){ return esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>"); }
+function inline(s){ return esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/==(.+?)==/g, "<mark>$1</mark>").replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1<em>$2</em>"); }
 function book(id){ for (var i=0;i<C.books.length;i++) if (C.books[i].id===id) return C.books[i]; return null; }
 function allQuizzes(){ var out=[]; C.books.forEach(function(b){ (b.quizzes||[]).forEach(function(q){ out.push({book:b, quiz:q}); }); }); return out; }
 function prog(bid){ if(!S.progress[bid]) S.progress[bid]={read:{},scroll:{}}; return S.progress[bid]; }
@@ -281,18 +300,33 @@ var I = {
 
 /* simple text -> HTML */
 function render(text){
-  var lines = String(text||"").replace(/\r/g,"").split("\n"), out=[], para=[], list=[];
+  var lines = String(text||"").replace(/\r/g,"").split("\n"), out=[], para=[], list=[], olist=[], table=[];
   function flushP(){ if(para.length){ out.push("<p>"+inline(para.join(" "))+"</p>"); para=[]; } }
   function flushL(){ if(list.length){ out.push("<ul>"+list.map(function(x){return "<li>"+inline(x)+"</li>";}).join("")+"</ul>"); list=[]; } }
+  function flushO(){ if(olist.length){ out.push("<ol>"+olist.map(function(x){return "<li>"+inline(x)+"</li>";}).join("")+"</ol>"); olist=[]; } }
+  function flushT(){
+    if(!table.length) return;
+    var rows = table.map(function(r){ return r.replace(/^\|/,"").replace(/\|\s*$/,"").split("|").map(function(c){ return c.trim(); }); });
+    var h = '<div class="tbl"><table><thead><tr>'+rows[0].map(function(c){ return "<th>"+inline(c)+"</th>"; }).join("")+'</tr></thead><tbody>';
+    rows.slice(1).forEach(function(r){ h += "<tr>"+r.map(function(c){ return "<td>"+inline(c)+"</td>"; }).join("")+"</tr>"; });
+    out.push(h+"</tbody></table></div>"); table=[];
+  }
+  function flushAll(){ flushP(); flushL(); flushO(); flushT(); }
   lines.forEach(function(raw){
     var l = raw.trim();
-    if (!l){ flushP(); flushL(); return; }
-    if (l.indexOf("## ")===0){ flushP(); flushL(); out.push("<h3>"+inline(l.slice(3))+"</h3>"); return; }
-    if (l.indexOf("> ")===0){ flushP(); flushL(); out.push("<blockquote>"+inline(l.slice(2))+"</blockquote>"); return; }
-    if (l.indexOf("- ")===0){ flushP(); list.push(l.slice(2)); return; }
-    flushL(); para.push(l);
+    if (!l){ flushAll(); return; }
+    if (l.charAt(0)==="|"){ flushP(); flushL(); flushO(); table.push(l); return; }
+    flushT();
+    if (l.indexOf("### ")===0){ flushAll(); out.push("<h4>"+inline(l.slice(4))+"</h4>"); return; }
+    if (l.indexOf("## ")===0){ flushAll(); out.push("<h3>"+inline(l.slice(3))+"</h3>"); return; }
+    if (l.indexOf("!! ")===0){ flushAll(); out.push('<div class="key"><span class="key-tag">จุดสำคัญ</span>'+inline(l.slice(3))+"</div>"); return; }
+    if (l.indexOf("> ")===0){ flushAll(); out.push("<blockquote>"+inline(l.slice(2))+"</blockquote>"); return; }
+    if (l.indexOf("- ")===0){ flushP(); flushO(); list.push(raw.match(/^\s{2,}/) && list.length ? "\u2003" + l.slice(2) : l.slice(2)); return; }
+    var mo = l.match(/^(\d+)\.\s+(.*)$/);
+    if (mo){ flushP(); flushL(); olist.push(mo[2]); return; }
+    flushL(); flushO(); para.push(l);
   });
-  flushP(); flushL();
+  flushAll();
   return out.join("");
 }
 
@@ -529,8 +563,9 @@ function startQuiz(bid, qid, fresh){
 }
 function buildQuiz(b, q, resume){
   var qs = q.questions.map(function(x){
-    var ch = x.choices.map(function(t,i){ return {text:t, correct:i===x.answer}; });
-    return {q:x.q, explain:x.explain||"", choices: q.shuffle ? shuffle(ch) : ch};
+    var ans = Array.isArray(x.answer) ? x.answer : [x.answer];
+    var ch = x.choices.map(function(t,i){ return {text:t, correct:ans.indexOf(i)>=0}; });
+    return {q:x.q, explain:x.explain||"", img:x.img||null, passage:x.passage||"", multi:ans.length>1, choices: q.shuffle ? shuffle(ch) : ch};
   });
   if (q.shuffle) qs = shuffle(qs);
   quiz = {book:b, def:q, qs:qs, i:0, picks:[], picked:null, L:labelsOf(q)};
@@ -553,7 +588,11 @@ VIEWS.play = function(){
   var h = topbar(quiz.def.name || quiz.def.title, {back:false, right:right});
   h += '<main><div class="wrap">';
   h += '<div class="qhead"><div class="bar"><i style="width:'+(quiz.i/n*100)+'%"></i></div><span>ข้อ '+th(quiz.i+1)+' / '+th(n)+'</span></div>';
-  h += '<p class="question">'+inline(Q.q)+'</p><div class="choices">';
+  if (Q.img && window.QUIZ_IMG && window.QUIZ_IMG[Q.img]) h += '<img class="qimg" alt="" src="'+window.QUIZ_IMG[Q.img]+'">';
+  var stem = Q.q, ps = Q.passage || "";
+  if (stem.indexOf("\n") >= 0){ var parts = stem.split("\n"); var last = parts.pop(); var head = parts.join("\n"); if (head.length > 120){ ps = (ps ? ps+"\n" : "") + head; stem = last; } }
+  if (ps) h += '<div class="passage">'+inline(ps)+'</div>';
+  h += '<p class="question">'+inline(stem).replace(/\n/g,'<br>')+'</p><div class="choices">';
   Q.choices.forEach(function(c,i){
     var cls = "";
     if (quiz.picked!==null){
@@ -564,8 +603,9 @@ VIEWS.play = function(){
   h += '</div>';
   if (quiz.picked!==null){
     var ok = Q.choices[quiz.picked].correct;
-    var ci = 0; Q.choices.forEach(function(c,k){ if (c.correct) ci = k; });
-    h += '<div class="feedback '+(ok?'ok':'no')+'"><b>'+(ok?'ถูกต้อง!':'ยังไม่ถูก · คำตอบที่ถูกคือข้อ '+quiz.L[ci])+'</b>'+(Q.explain?inline(Q.explain):'')+'</div>';
+    var cl = []; Q.choices.forEach(function(c,k){ if (c.correct) cl.push(quiz.L[k]); });
+    var head = ok ? 'ถูกต้อง!' + (Q.multi ? ' (ข้อนี้ถูกได้หลายข้อ: '+cl.join(', ')+')' : '') : 'ยังไม่ถูก · คำตอบที่ถูกคือข้อ '+cl.join(', ');
+    h += '<div class="feedback '+(ok?'ok':'no')+'"><b>'+head+'</b>'+(Q.explain?'<div class="ex">'+inline(Q.explain)+'</div>':'')+'</div>';
     h += '<div style="margin-top:18px"><button class="btn block" data-a="nextq">'+(quiz.i<n-1?'ข้อต่อไป':'ดูผลคะแนน')+'</button></div>';
   }
   h += '</div></main>';
@@ -577,8 +617,9 @@ function finishQuiz(){
   var score = 0, details = [];
   quiz.qs.forEach(function(Q,k){
     var p = quiz.picks[k], ok = Q.choices[p].correct; if (ok){ score++; return; }
-    var ci = 0; Q.choices.forEach(function(c,j){ if (c.correct) ci = j; });
-    details.push({no:k+1, q:Q.q, picked:quiz.L[p]+'. '+Q.choices[p].text, correct:quiz.L[ci]+'. '+Q.choices[ci].text, ok:false, explain:Q.explain});
+    var cs = []; Q.choices.forEach(function(c,j){ if (c.correct) cs.push(quiz.L[j]+'. '+c.text); });
+    var qshort = Q.q.split("\n").pop();
+    details.push({no:k+1, q:qshort, picked:quiz.L[p]+'. '+Q.choices[p].text, correct:cs.join(' / '), ok:false, explain:Q.explain});
   });
   if (S.inprog) delete S.inprog[quiz.def.id];
   var r = {id:String(Date.now()), quizId:quiz.def.id, bookId:quiz.book.id, quizTitle:quiz.book.title+' · '+(quiz.def.name || quiz.def.title), score:score, total:quiz.qs.length, date:new Date().toISOString(), name:S.name, details:details, wrongOnly:true};
@@ -613,7 +654,7 @@ VIEWS.review = function(p){
     h += '<div class="rq"><p>'+(r.wrongOnly?'ข้อ '+th(d.no):(k+1))+'. '+inline(d.q)+'</p>';
     if (d.ok) h += '<div class="ans ok-t">✓ <span>'+inline(d.picked)+'</span></div>';
     else h += '<div class="ans bad-t">✗ <span>คำตอบของคุณ: '+inline(d.picked)+'</span></div><div class="ans ok-t">✓ <span>คำตอบที่ถูก: '+inline(d.correct)+'</span></div>';
-    if (d.explain) h += '<div class="ex">'+inline(d.explain)+'</div>';
+    if (d.explain) h += '<div class="ex" style="white-space:pre-line">'+inline(d.explain)+'</div>';
     h += '</div>';
   });
   h += '</div></div></main>';
