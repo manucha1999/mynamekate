@@ -264,7 +264,8 @@ function pct(r){ return Math.round(r.score/r.total*100); }
 function chipClass(p){ return p>=80 ? "good" : (p<50 ? "low" : ""); }
 function fmtDate(iso){ var d=new Date(iso); try { return d.toLocaleString("th-TH",{dateStyle:"medium",timeStyle:"short"}); } catch(e){ return d.toLocaleString(); } }
 function shuffle(a){ a=a.slice(); for (var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
-var LETTERS = ["ก","ข","ค","ง","จ","ฉ"];
+var LABELS = {kk:["ก","ข","ค","ง","จ","ฉ"], num:["1","2","3","4","5","6"], th:["๑","๒","๓","๔","๕","๖"]};
+function labelsOf(def){ return LABELS[(def && def.labels) || "kk"] || LABELS.kk; }
 
 var I = {
   back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
@@ -398,17 +399,26 @@ VIEWS.sums = function(p){
   app.innerHTML = h;
 };
 
+function qCount(q){ return q.count || (q.questions ? q.questions.length : 0); }
 function quizItem(b,q){
-  var bs = best(q.id), n = attempts(q.id).length;
+  var bs = best(q.id), n = attempts(q.id).length, ip = S.inprog && S.inprog[q.id];
   var right = bs ? '<span class="score-chip '+chipClass(pct(bs))+'">'+th(bs.score+'/'+bs.total)+'</span>' : '<span class="pill">ยังไม่ได้ทำ</span>';
-  return '<button class="item" data-a="quiz" data-b="'+b.id+'" data-q="'+q.id+'"><span class="n">?</span><span class="tx"><b>'+esc(q.title)+'</b><span>'+th(q.questions.length)+' ข้อ'+(n?' · ทำแล้ว '+th(n)+' ครั้ง · คะแนนดีที่สุด':'')+'</span></span>'+right+'</button>';
+  var sub = th(qCount(q))+' ข้อ' + (ip ? ' · <b style="display:inline;color:var(--accent);font-weight:600">ทำค้างไว้ข้อ '+th(ip.i+1)+'</b>' : '') + (n?' · ทำแล้ว '+th(n)+' ครั้ง':'');
+  return '<button class="item" data-a="quiz" data-b="'+b.id+'" data-q="'+q.id+'"><span class="n'+(bs?' done':'')+'">'+(bs?'✓':'?')+'</span><span class="tx"><b>'+esc(q.title)+'</b><span>'+sub+'</span></span>'+right+'</button>';
 }
 
 VIEWS.quizlist = function(p){
   var s = book(p.id); if(!s){ tab("home"); return; }
   var h = topbar("ข้อสอบ · "+s.title) + '<main><div class="wrap">';
   if (!(s.quizzes||[]).length) h += '<div class="empty">ยังไม่มีข้อสอบ</div>';
-  else { h += '<div class="card list">'; s.quizzes.forEach(function(q){ h += quizItem(s,q); }); h += '</div>'; }
+  else {
+    var groups = [], gmap = {};
+    s.quizzes.forEach(function(q){ var g = q.group || ""; if (!(g in gmap)){ gmap[g] = []; groups.push(g); } gmap[g].push(q); });
+    groups.forEach(function(g, gi){
+      if (g) h += '<h2 class="sec"'+(gi===0?' style="margin-top:4px"':'')+'>'+esc(g)+'</h2>';
+      h += '<div class="card list">'; gmap[g].forEach(function(q){ h += quizItem(s,q); }); h += '</div>';
+    });
+  }
   h += '</div></main>';
   app.innerHTML = h;
 };
@@ -486,24 +496,56 @@ function tocPanel(){
 }
 
 /* ---------- quiz ---------- */
-function startQuiz(bid, qid){
+var loading = false;
+function startQuiz(bid, qid, fresh){
   var b = book(bid), q = null;
   (b && b.quizzes || []).forEach(function(x){ if (x.id===qid) q=x; });
   if (!q) return;
+  if (!q.questions && q.file){
+    if (loading) return; loading = true;
+    var closeL = modal('<h3>กำลังโหลดข้อสอบ…</h3><p>'+esc(q.name || q.title)+'</p>');
+    fetch(q.file).then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); }).then(function(data){
+      loading = false; closeL(); q.questions = data.questions; startQuiz(bid, qid, fresh);
+    }).catch(function(){
+      loading = false; closeL();
+      modal('<h3>โหลดข้อสอบไม่ได้</h3><p>ตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่อีกครั้ง</p><button class="btn block" data-m="x">ตกลง</button>', function(m, close){ m.querySelector('[data-m="x"]').onclick = close; });
+    });
+    return;
+  }
+  var ip = S.inprog && S.inprog[q.id];
+  if (ip && !fresh && !q.shuffle && ip.picks && ip.i < q.questions.length){
+    modal('<h3>ทำต่อจากเดิมไหม?</h3><p>คุณทำ '+esc(q.name || q.title)+' ค้างไว้ที่ข้อ '+th(ip.i+1)+' จาก '+th(q.questions.length)+'</p><div class="row-btns"><button class="btn ghost" data-m="new">เริ่มใหม่</button><button class="btn" data-m="go">ทำต่อ</button></div>', function(m, close){
+      m.querySelector('[data-m="new"]').onclick = function(){ close(); delete S.inprog[q.id]; save(); startQuiz(bid, qid, true); };
+      m.querySelector('[data-m="go"]').onclick = function(){ close(); buildQuiz(b, q, ip); };
+    });
+    return;
+  }
+  buildQuiz(b, q, null);
+}
+function buildQuiz(b, q, resume){
   var qs = q.questions.map(function(x){
     var ch = x.choices.map(function(t,i){ return {text:t, correct:i===x.answer}; });
     return {q:x.q, explain:x.explain||"", choices: q.shuffle ? shuffle(ch) : ch};
   });
   if (q.shuffle) qs = shuffle(qs);
-  quiz = {book:b, def:q, qs:qs, i:0, picks:[], picked:null};
+  quiz = {book:b, def:q, qs:qs, i:0, picks:[], picked:null, L:labelsOf(q)};
+  if (resume){ quiz.i = resume.i; quiz.picks = resume.picks.slice(0, resume.i); }
   go("play", {}, stack[stack.length-1].view==="result");
+}
+function saveProgress(){
+  if (!quiz || quiz.def.shuffle) return;
+  if (!S.inprog) S.inprog = {};
+  var nextI = quiz.picked!==null ? quiz.i+1 : quiz.i;
+  if (nextI >= quiz.qs.length){ delete S.inprog[quiz.def.id]; }
+  else if (nextI > 0) S.inprog[quiz.def.id] = {i:nextI, picks:quiz.picks.slice(0,nextI)};
+  save();
 }
 
 VIEWS.play = function(){
   if (!quiz){ tab("home"); return; }
   var Q = quiz.qs[quiz.i], n = quiz.qs.length;
   var right = '<button class="icon-btn" data-a="quit" aria-label="ออกจากแบบทดสอบ">'+I.close+'</button>';
-  var h = topbar(quiz.def.title, {back:false, right:right});
+  var h = topbar(quiz.def.name || quiz.def.title, {back:false, right:right});
   h += '<main><div class="wrap">';
   h += '<div class="qhead"><div class="bar"><i style="width:'+(quiz.i/n*100)+'%"></i></div><span>ข้อ '+th(quiz.i+1)+' / '+th(n)+'</span></div>';
   h += '<p class="question">'+inline(Q.q)+'</p><div class="choices">';
@@ -512,12 +554,13 @@ VIEWS.play = function(){
     if (quiz.picked!==null){
       if (c.correct) cls = " right"; else if (i===quiz.picked) cls = " wrong"; else cls = " dim";
     }
-    h += '<button class="choice'+cls+'" data-a="pick" data-i="'+i+'"'+(quiz.picked!==null?' disabled':'')+'><span class="k">'+LETTERS[i]+'</span><span>'+inline(c.text)+'</span></button>';
+    h += '<button class="choice'+cls+'" data-a="pick" data-i="'+i+'"'+(quiz.picked!==null?' disabled':'')+'><span class="k">'+quiz.L[i]+'</span><span>'+inline(c.text)+'</span></button>';
   });
   h += '</div>';
   if (quiz.picked!==null){
     var ok = Q.choices[quiz.picked].correct;
-    h += '<div class="feedback '+(ok?'ok':'no')+'"><b>'+(ok?'ถูกต้อง!':'ยังไม่ถูก')+'</b>'+(Q.explain?inline(Q.explain):'')+'</div>';
+    var ci = 0; Q.choices.forEach(function(c,k){ if (c.correct) ci = k; });
+    h += '<div class="feedback '+(ok?'ok':'no')+'"><b>'+(ok?'ถูกต้อง!':'ยังไม่ถูก · คำตอบที่ถูกคือข้อ '+quiz.L[ci])+'</b>'+(Q.explain?inline(Q.explain):'')+'</div>';
     h += '<div style="margin-top:18px"><button class="btn block" data-a="nextq">'+(quiz.i<n-1?'ข้อต่อไป':'ดูผลคะแนน')+'</button></div>';
   }
   h += '</div></main>';
@@ -526,13 +569,15 @@ VIEWS.play = function(){
 };
 
 function finishQuiz(){
-  var score = 0, details = quiz.qs.map(function(Q,k){
-    var p = quiz.picks[k], ok = Q.choices[p].correct; if (ok) score++;
-    var correct = Q.choices.filter(function(c){return c.correct;})[0];
-    return {q:Q.q, picked:Q.choices[p].text, correct:correct?correct.text:"", ok:ok, explain:Q.explain};
+  var score = 0, details = [];
+  quiz.qs.forEach(function(Q,k){
+    var p = quiz.picks[k], ok = Q.choices[p].correct; if (ok){ score++; return; }
+    var ci = 0; Q.choices.forEach(function(c,j){ if (c.correct) ci = j; });
+    details.push({no:k+1, q:Q.q, picked:quiz.L[p]+'. '+Q.choices[p].text, correct:quiz.L[ci]+'. '+Q.choices[ci].text, ok:false, explain:Q.explain});
   });
-  var r = {id:String(Date.now()), quizId:quiz.def.id, bookId:quiz.book.id, quizTitle:quiz.book.title+' · '+quiz.def.title, score:score, total:quiz.qs.length, date:new Date().toISOString(), name:S.name, details:details};
-  S.results.push(r); if (S.results.length>200) S.results.shift(); save();
+  if (S.inprog) delete S.inprog[quiz.def.id];
+  var r = {id:String(Date.now()), quizId:quiz.def.id, bookId:quiz.book.id, quizTitle:quiz.book.title+' · '+(quiz.def.name || quiz.def.title), score:score, total:quiz.qs.length, date:new Date().toISOString(), name:S.name, details:details, wrongOnly:true};
+  S.results.push(r); while (S.results.length>150) S.results.shift(); save();
   go("result", {id:r.id}, true);
 }
 
@@ -547,7 +592,7 @@ VIEWS.result = function(p){
   h += '<div class="ring"><svg viewBox="0 0 170 170"><circle cx="85" cy="85" r="'+R+'" fill="none" stroke="var(--line)" stroke-width="14"/><circle id="arc" cx="85" cy="85" r="'+R+'" fill="none" stroke="'+col+'" stroke-width="14" stroke-linecap="round" stroke-dasharray="'+CIRC+'" stroke-dashoffset="'+CIRC+'" style="transition:stroke-dashoffset .9s ease"/></svg><div class="v"><b>'+th(r.score+'/'+r.total)+'</b><span>'+th(P)+'%</span></div></div>';
   h += '<h2>'+msg+'</h2><p class="sub">'+esc(r.quizTitle)+'</p>';
   h += '<div class="stamp">'+(r.name?esc(r.name)+' · ':'')+fmtDate(r.date)+'</div></div>';
-  h += '<div class="row-btns" style="margin-top:18px"><button class="btn" data-a="review" data-r="'+r.id+'">ดูเฉลย</button><button class="btn ghost" data-a="retry" data-b="'+r.bookId+'" data-q="'+r.quizId+'">ทำใหม่อีกครั้ง</button></div>';
+  h += '<div class="row-btns" style="margin-top:18px">'+(r.score<r.total?'<button class="btn" data-a="review" data-r="'+r.id+'">ดูข้อที่ตอบผิด</button>':'')+'<button class="btn ghost" data-a="retry" data-b="'+r.bookId+'" data-q="'+r.quizId+'">ทำใหม่อีกครั้ง</button></div>';
   h += '<div class="row-btns" style="margin-top:10px"><button class="btn ghost" data-a="tab" data-v="home">กลับหน้าหลัก</button></div>';
   h += '</div></main>';
   app.innerHTML = h;
@@ -556,10 +601,11 @@ VIEWS.result = function(p){
 
 VIEWS.review = function(p){
   var r = findResult(p.id); if(!r){ back(); return; }
-  var h = topbar("เฉลย") + '<main><div class="wrap">';
-  h += '<p style="margin:0;font-weight:600">'+esc(r.quizTitle)+'</p><p class="sub" style="margin-bottom:14px">ได้ '+r.score+'/'+r.total+' คะแนน · '+fmtDate(r.date)+'</p><div class="card review">';
+  var h = topbar(r.wrongOnly ? "ข้อที่ตอบผิด" : "เฉลย") + '<main><div class="wrap">';
+  h += '<p style="margin:0;font-weight:600">'+esc(r.quizTitle)+'</p><p class="sub" style="margin-bottom:14px">ได้ '+th(r.score+'/'+r.total)+' คะแนน · '+fmtDate(r.date)+'</p><div class="card review">';
+  if (r.wrongOnly && !r.details.length) h += '<div class="rq"><p>ถูกทุกข้อ ไม่มีข้อที่ตอบผิด</p></div>';
   r.details.forEach(function(d,k){
-    h += '<div class="rq"><p>'+(k+1)+'. '+inline(d.q)+'</p>';
+    h += '<div class="rq"><p>'+(r.wrongOnly?'ข้อ '+th(d.no):(k+1))+'. '+inline(d.q)+'</p>';
     if (d.ok) h += '<div class="ans ok-t">✓ <span>'+inline(d.picked)+'</span></div>';
     else h += '<div class="ans bad-t">✗ <span>คำตอบของคุณ: '+inline(d.picked)+'</span></div><div class="ans ok-t">✓ <span>คำตอบที่ถูก: '+inline(d.correct)+'</span></div>';
     if (d.explain) h += '<div class="ex">'+inline(d.explain)+'</div>';
@@ -636,9 +682,9 @@ function handle(e){
     case "fs": S.fontSize = Math.max(14, Math.min(34, S.fontSize + (+d.d))); save(); document.documentElement.style.setProperty("--fs", S.fontSize+"px"); aaPanel(); break;
     case "theme": S.theme = d.t; save(); document.documentElement.setAttribute("data-theme", S.theme); aaPanel(); break;
     case "quiz": case "retry": startQuiz(d.b, d.q); break;
-    case "pick": if (quiz && quiz.picked===null){ quiz.picked = +d.i; quiz.picks[quiz.i] = +d.i; show(); } break;
+    case "pick": if (quiz && quiz.picked===null){ quiz.picked = +d.i; quiz.picks[quiz.i] = +d.i; saveProgress(); show(); } break;
     case "nextq": if (quiz.i < quiz.qs.length-1){ quiz.i++; quiz.picked=null; show(); window.scrollTo(0,0); } else finishQuiz(); break;
-    case "quit": confirmBox("ออกจากแบบทดสอบ?", "คำตอบที่ทำไว้จะไม่ถูกบันทึก", "ออก", function(){ quiz=null; if (stack.length>1) back(); else tab("home"); }); break;
+    case "quit": confirmBox("ออกจากแบบทดสอบ?", quiz && !quiz.def.shuffle ? "ระบบจำไว้ว่าทำถึงข้อไหน กลับมาทำต่อได้ภายหลัง" : "คำตอบที่ทำไว้จะไม่ถูกบันทึก", "ออก", function(){ quiz=null; if (stack.length>1) back(); else tab("home"); }); break;
     case "review": go("review", {id:d.r}); break;
     case "copy": { var r=findResult(d.r); if (r) copyText(resultText(r)); break; }
     case "clear": confirmBox("ล้างประวัติการสอบ?", "ผลสอบทั้งหมดในเครื่องนี้จะถูกลบ และกู้คืนไม่ได้", "ล้างประวัติ", function(){ S.results=[]; save(); show(); }); break;
